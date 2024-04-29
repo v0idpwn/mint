@@ -1555,7 +1555,7 @@ defmodule Mint.HTTP2 do
 
     conn =
       if window_size_increment > 0 do
-        refill_client_windows(conn, stream_id, window_size_increment)
+          refill_client_windows(conn, stream_id, window_size_increment)
       else
         conn
       end
@@ -1566,7 +1566,7 @@ defmodule Mint.HTTP2 do
         responses = [{:data, stream.ref, data} | responses]
 
         if flag_set?(flags, :data, :end_stream) do
-          conn = close_stream!(conn, stream.id, :no_error)
+          conn = delete_stream(conn, stream.id)
           {conn, [{:done, stream.ref} | responses]}
         else
           {conn, responses}
@@ -1575,6 +1575,16 @@ defmodule Mint.HTTP2 do
       :error ->
         log(conn, :debug, "Received DATA frame on closed stream ID #{stream_id}")
         {conn, responses}
+    end
+  end
+
+  defp refill_client_window(conn, data_size) do
+    connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
+
+    if open?(conn) do
+      send!(conn, [Frame.encode(connection_frame)])
+    else
+      conn
     end
   end
 
@@ -1675,7 +1685,7 @@ defmodule Mint.HTTP2 do
                 {conn, responses}
 
               end_stream? ->
-                conn = close_stream!(conn, stream.id, :no_error)
+                conn = delete_stream(conn, stream.id)
                 {conn, [{:done, ref} | new_responses]}
 
               true ->
@@ -1685,7 +1695,7 @@ defmodule Mint.HTTP2 do
             end
 
           end_stream? ->
-            conn = close_stream!(conn, stream.id, :no_error)
+            conn = delete_stream(conn, stream.id)
             {conn, [{:done, ref} | new_responses]}
 
           true ->
@@ -1695,7 +1705,7 @@ defmodule Mint.HTTP2 do
       # Trailer headers. We don't care about the :status header here.
       headers when received_first_headers? ->
         if end_stream? do
-          conn = close_stream!(conn, stream.id, :no_error)
+          conn = delete_stream(conn, stream.id)
           headers = headers |> Headers.remove_unallowed_trailer() |> join_cookie_headers()
           {conn, [{:done, ref}, {:headers, ref, headers} | responses]}
         else
