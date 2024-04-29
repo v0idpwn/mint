@@ -1555,7 +1555,11 @@ defmodule Mint.HTTP2 do
 
     conn =
       if window_size_increment > 0 do
-        refill_client_windows(conn, stream_id, window_size_increment)
+        if flag_set?(flags, :data, :end_stream) do
+          refill_client_window(conn, window_size_increment)
+        else
+          refill_client_windows(conn, stream_id, window_size_increment)
+        end
       else
         conn
       end
@@ -1566,7 +1570,7 @@ defmodule Mint.HTTP2 do
         responses = [{:data, stream.ref, data} | responses]
 
         if flag_set?(flags, :data, :end_stream) do
-          conn = close_stream!(conn, stream.id, :no_error)
+          conn = delete_stream(conn, stream.id)
           {conn, [{:done, stream.ref} | responses]}
         else
           {conn, responses}
@@ -1575,6 +1579,16 @@ defmodule Mint.HTTP2 do
       :error ->
         log(conn, :debug, "Received DATA frame on closed stream ID #{stream_id}")
         {conn, responses}
+    end
+  end
+
+  defp refill_client_window(conn, data_size) do
+    connection_frame = window_update(stream_id: 0, window_size_increment: data_size)
+
+    if open?(conn) do
+      send!(conn, [Frame.encode(connection_frame)])
+    else
+      conn
     end
   end
 
